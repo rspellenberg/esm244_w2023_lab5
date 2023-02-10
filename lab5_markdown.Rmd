@@ -1,0 +1,158 @@
+---
+title: "lab5"
+author: "R. Spellenberg"
+date: "2023-02-09"
+output: 
+  html_document:
+    code_folding: hide
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE, message = FALSE, warning = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+library(tidyverse)
+library(here)
+
+###Part One: PCA
+library(ggfortify)
+library(patchwork)
+
+###Part Two: ggplot customization, reading files
+library(readxl)
+library(gghighlight)
+library(lubridate)
+library(plotly)
+
+###YAML header (to look up customization options)
+```
+
+## Part 1: Principal Component Analysis (PCA)
+```{r}
+hdi_data <- read_csv(here('data/hdi_clean.csv')) %>%
+  drop_na() %>% 
+  mutate(hdicode = factor(hdicode, levels = c('Low', 'Medium', 'High', 'Very High')))
+
+#use mutate to turn the hdi_code column into factor so that R recognizes Low -> Very High as the ranking rather than alphabetical order
+
+hdi_pca <- hdi_data %>% 
+  dplyr::select(where(is.numeric)) %>% 
+  scale() %>% 
+  prcomp()
+
+### can call hdi_pca to get loadings
+### summary(hdi_pca) shows us how much each variable is captured by PC
+```
+
+```{r}
+loadings_df <- data.frame(hdi_pca$rotation*8) %>% 
+  mutate(axis = row.names(.))
+
+new_pts_df <- data.frame(hdi_pca$x)
+
+ggplot() + 
+  geom_point(data = new_pts_df, aes(x = PC1, y = PC2), color = 'blue') +
+  geom_segment(data = loadings_df, x = 0, y = 0,
+               aes(xend = PC1, yend = PC2, group = axis),
+               arrow = arrow(length = unit(.25, 'cm'))) +
+  geom_text(data = loadings_df,
+            aes(x = PC1, y = PC2, label = axis)) +
+  theme_minimal()
+```
+
+```{r}
+autoplot(hdi_pca, 
+         data = hdi_data,
+         loadings = TRUE,
+         colour = 'hdicode',
+         loadings.label = TRUE,
+         loadings.colour = 'black',
+         loadings.label.colour = 'black',
+         loadings.label.vjust = -0.5) +
+  scale_color_manual(values = c('red', 'orange', 'yellowgreen', 'darkgreen')) +
+  theme_minimal()
+```
+
+### Scree plot by hand
+```{r}
+sd_vec <- hdi_pca$sdev
+var_vec <- sd_vec^2
+pc_names <- colnames(hdi_pca$rotation)
+
+pct_expl_df <- data.frame(v = var_vec,
+                          pct_v = var_vec / sum(var_vec),
+                          pc = fct_inorder(pc_names)) %>% 
+  mutate(pct_lbl = paste0(round(pct_v * 100, 1), '%'))
+
+ggplot(pct_expl_df, aes(x = pc, y = v)) +
+  geom_col() +
+  geom_text(aes(label = pct_lbl), vjust = 0, nudge_y = 0.002) +
+  labs(x = 'Principal Component', y = 'Variance Explained')
+
+### pct_v = percent variance
+```
+
+### scree plots by R
+```{r}
+screeplot(hdi_pca, type = 'lines')
+screeplot(hdi_pca, type = 'barplot')
+```
+
+<br/><br/>
+
+## Part Two: ggplot customization, reading files
+
+### Read in Excel file, wrangle the data
+```{r}
+fish_noaa <- readxl::read_excel(here('data', 'foss_landings.xlsx')) %>% 
+  janitor::clean_names() %>% 
+  mutate(across(where(is.character), tolower)) %>% 
+  mutate(nmfs_name = str_sub(nmfs_name, end = -4)) %>% 
+  filter(confidentiality == 'public')
+  
+```
+
+```{r}
+fish_plot <- ggplot(data = fish_noaa,
+                    aes(x = year, y = pounds, group = nmfs_name)) +
+  geom_line(aes(color = nmfs_name)) + 
+  theme_minimal()
+fish_plot
+
+### make it interactive
+ggplotly(fish_plot)
+
+### highlight series based on condition(s)
+ggplot(data = fish_noaa, aes(x = year, y = pounds, group = nmfs_name)) +
+  geom_line() +
+  gghighlight(nmfs_name == 'rockfishes') + ###highlights just this group
+  theme_minimal()
+
+ggplot(data = fish_noaa, aes(x = year, y = pounds, group = nmfs_name)) +
+  gghighlight(max(pounds) > 1e8) + ###highlights groups that match this criterion
+  theme_minimal()
+```
+
+### Read in data from web
+```{r}
+monroe_wt <- read_csv('https://raw.githubusercontent.com/oharac/esm244_w2023_lab5/master/data/MWTP_Elec_Daily.csv') %>% 
+  janitor::clean_names()
+
+monroe_ts <- monroe_wt %>% 
+  mutate(date = lubridate::mdy(date)) %>% 
+  mutate(record_month = lubridate::month(date)) %>% 
+  mutate(month_name = month.abb[record_month]) %>% 
+  mutate(month_name = fct_reorder(month_name, record_month))
+
+ggplot(data = monroe_ts, aes(x = month_name, y = total_kwh)) + 
+  geom_jitter(aes(color = month_name),
+              show.legend = FALSE,
+              alpha = 0.5,
+              size = 0.3,
+              width = 0.2) +
+  theme_classic()
+
+###month.abb = the month abbreviations
+###month.name = the full month name
+```
+
